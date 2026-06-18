@@ -74,14 +74,15 @@ export default function GateScreen({ onUnlock }: GateScreenProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const particleCanvasRef = useRef<HTMLCanvasElement>(null);
   const formRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
   const errorRef = useRef<HTMLDivElement>(null);
-  const [password, setPassword] = useState('');
+  const [pin, setPin] = useState(['', '', '', '']);
   const [error, setError] = useState(false);
+  const [activeDigit, setActiveDigit] = useState(0);
+  const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const animFrameRef = useRef<number>(0);
   const mouseRef = useRef({ x: 0.5, y: 0.5 });
 
-  const CORRECT_PASSWORD = 'InlwellLabs';
+  const CORRECT_PIN = '7124';
 
   // Three.js shader setup
   useEffect(() => {
@@ -200,13 +201,21 @@ export default function GateScreen({ onUnlock }: GateScreenProps) {
     };
   }, []);
 
-  const handleSubmit = useCallback(() => {
-    if (password === CORRECT_PASSWORD) {
+  // Auto-focus first input on mount
+  useEffect(() => {
+    setTimeout(() => {
+      inputRefs.current[0]?.focus();
+    }, 500);
+  }, []);
+
+  const validatePin = useCallback((digits: string[]) => {
+    const entered = digits.join('');
+    if (entered === CORRECT_PIN) {
       setError(false);
       // Success animation
-      if (inputRef.current) {
-        inputRef.current.style.borderColor = '#4ADE80';
-      }
+      inputRefs.current.forEach((input) => {
+        if (input) input.style.borderColor = '#4ADE80';
+      });
       setTimeout(() => {
         if (formRef.current) {
           gsap.to(formRef.current, {
@@ -223,7 +232,8 @@ export default function GateScreen({ onUnlock }: GateScreenProps) {
           onComplete: onUnlock,
         });
       }, 400);
-    } else {
+    } else if (digits.every((d) => d !== '')) {
+      // All filled but incorrect
       setError(true);
       if (formRef.current) {
         gsap.to(formRef.current, {
@@ -234,20 +244,81 @@ export default function GateScreen({ onUnlock }: GateScreenProps) {
           ease: 'power2.out',
         });
       }
-      if (inputRef.current) {
-        inputRef.current.style.borderColor = '#EF4444';
-        setTimeout(() => {
-          if (inputRef.current) {
-            inputRef.current.style.borderColor = 'rgba(201, 169, 110, 0.2)';
-          }
-        }, 1000);
-      }
+      inputRefs.current.forEach((input) => {
+        if (input) input.style.borderColor = '#EF4444';
+      });
+      setTimeout(() => {
+        setPin(['', '', '', '']);
+        setActiveDigit(0);
+        inputRefs.current.forEach((input) => {
+          if (input) input.style.borderColor = 'rgba(201, 169, 110, 0.2)';
+        });
+        inputRefs.current[0]?.focus();
+      }, 800);
     }
-  }, [password, onUnlock]);
+  }, [onUnlock]);
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      handleSubmit();
+  const handleDigitChange = (index: number, value: string) => {
+    // Only allow single digit
+    const digit = value.replace(/\D/g, '').slice(-1);
+    const newPin = [...pin];
+    newPin[index] = digit;
+    setPin(newPin);
+    setError(false);
+
+    // Reset border color
+    if (inputRefs.current[index]) {
+      inputRefs.current[index]!.style.borderColor = 'rgba(201, 169, 110, 0.2)';
+    }
+
+    if (digit) {
+      // Move to next input
+      if (index < 3) {
+        setActiveDigit(index + 1);
+        setTimeout(() => {
+          inputRefs.current[index + 1]?.focus();
+        }, 10);
+      }
+      // Check if complete
+      setTimeout(() => {
+        validatePin(newPin);
+      }, 50);
+    }
+  };
+
+  const handleKeyDown = (index: number, e: React.KeyboardEvent) => {
+    if (e.key === 'Backspace') {
+      if (pin[index] === '' && index > 0) {
+        // Move to previous input
+        const newPin = [...pin];
+        newPin[index - 1] = '';
+        setPin(newPin);
+        setActiveDigit(index - 1);
+        setTimeout(() => {
+          inputRefs.current[index - 1]?.focus();
+        }, 10);
+      } else {
+        const newPin = [...pin];
+        newPin[index] = '';
+        setPin(newPin);
+      }
+      setError(false);
+    } else if (e.key >= '0' && e.key <= '9') {
+      e.preventDefault();
+      handleDigitChange(index, e.key);
+    }
+  };
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    e.preventDefault();
+    const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 4);
+    if (pasted.length === 4) {
+      const newPin = pasted.split('');
+      setPin(newPin);
+      setError(false);
+      setTimeout(() => {
+        validatePin(newPin);
+      }, 50);
     }
   };
 
@@ -296,7 +367,7 @@ export default function GateScreen({ onUnlock }: GateScreenProps) {
           className="glass-panel"
           style={{
             padding: '56px 64px',
-            maxWidth: '420px',
+            maxWidth: '440px',
             width: '90%',
             pointerEvents: 'auto',
           }}
@@ -342,31 +413,62 @@ export default function GateScreen({ onUnlock }: GateScreenProps) {
               lineHeight: 1.5,
             }}
           >
-            Enter password to access the Revilopark showcase.
+            Enter your 4-digit PIN to access the showcase.
           </p>
 
-          {/* Password input */}
-          <input
-            ref={inputRef}
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="••••••••"
-            className="glass-input"
+          {/* PIN Inputs */}
+          <div
             style={{
-              width: '100%',
+              display: 'flex',
+              justifyContent: 'center',
+              gap: '12px',
               marginBottom: '16px',
-              boxSizing: 'border-box',
             }}
-            aria-label="Password"
-            aria-describedby={error ? 'password-error' : undefined}
-          />
+            onPaste={handlePaste}
+          >
+            {pin.map((digit, index) => (
+              <input
+                key={index}
+                ref={(el) => {
+                  inputRefs.current[index] = el;
+                }}
+                type="text"
+                inputMode="numeric"
+                maxLength={1}
+                value={digit}
+                onChange={(e) => handleDigitChange(index, e.target.value)}
+                onKeyDown={(e) => handleKeyDown(index, e)}
+                onFocus={() => setActiveDigit(index)}
+                className="font-mono-label"
+                style={{
+                  width: '56px',
+                  height: '64px',
+                  background: 'rgba(255, 255, 255, 0.03)',
+                  border: `1px solid ${
+                    activeDigit === index
+                      ? 'rgba(201, 169, 110, 0.5)'
+                      : 'rgba(201, 169, 110, 0.2)'
+                  }`,
+                  borderRadius: '8px',
+                  color: '#E8E4DC',
+                  fontSize: '28px',
+                  textAlign: 'center',
+                  letterSpacing: '0.1em',
+                  outline: 'none',
+                  transition: 'all 0.2s ease',
+                  caretColor: '#C9A96E',
+                }}
+                aria-label={`PIN digit ${index + 1}`}
+                aria-describedby={error ? 'pin-error' : undefined}
+                autoComplete="off"
+              />
+            ))}
+          </div>
 
           {/* Error message */}
           <div
             ref={errorRef}
-            id="password-error"
+            id="pin-error"
             role="alert"
             aria-live="polite"
             className="font-mono-label"
@@ -380,12 +482,12 @@ export default function GateScreen({ onUnlock }: GateScreenProps) {
               textAlign: 'center',
             }}
           >
-            Incorrect password
+            Incorrect PIN
           </div>
 
           {/* Submit button */}
           <button
-            onClick={handleSubmit}
+            onClick={() => validatePin(pin)}
             className="btn-gold"
             style={{
               width: '100%',
